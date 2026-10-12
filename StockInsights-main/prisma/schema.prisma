@@ -1,0 +1,312 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// USER & SUBSCRIPTION MODELS
+// ==========================================
+
+model User {
+  id              String          @id @default(uuid())
+  clerkId         String          @unique
+  email           String          @unique
+  name            String?
+  plan            SubscriptionPlan @default(FREE)
+  planExpiresAt   DateTime?
+  stripeCustomerId String?        @unique
+  portfolios      Portfolio[]
+  holdings        PortfolioHolding[]
+  transactions    Transaction[]
+  watchlists      Watchlist[]
+  alerts          PriceAlert[]
+  payments        Payment[]
+  Subscription    Subscription[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @default(now()) @updatedAt
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+  ELITE
+}
+
+// ==========================================
+// PORTFOLIO & HOLDINGS MODELS
+// ==========================================
+
+model Portfolio {
+  id           String   @id @default(uuid())
+  userId       String
+  symbol       String
+  quantity     Int
+  avgPrice     Float
+  currentPrice Float?
+  createdAt    DateTime @default(now())
+
+  User User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([symbol])
+}
+
+model PortfolioHolding {
+  id              String        @id @default(uuid())
+  userId          String
+  symbol          String
+  quantity        Float         @default(0)
+  avgBuyPrice     Float         @default(0)
+  totalInvested   Float         @default(0)
+  realizedPnL     Float         @default(0)
+  transactions    Transaction[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  User User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, symbol])
+  @@index([userId])
+  @@index([symbol])
+}
+
+model Transaction {
+  id              String          @id @default(uuid())
+  userId          String
+  holdingId       String
+  symbol          String
+  type            TransactionType
+  quantity        Float
+  price           Float
+  totalAmount     Float
+  fees            Float           @default(0)
+  notes           String?
+  executedAt      DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+
+  User    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Holding PortfolioHolding @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([holdingId])
+  @@index([symbol])
+  @@index([executedAt])
+}
+
+enum TransactionType {
+  BUY
+  SELL
+  DIVIDEND
+  SPLIT
+}
+
+// ==========================================
+// WATCHLIST MODEL
+// ==========================================
+
+model Watchlist {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String
+  symbols   String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  User User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ==========================================
+// PRICE ALERTS MODEL
+// ==========================================
+
+model PriceAlert {
+  id            String      @id @default(uuid())
+  userId        String
+  symbol        String
+  alertType     AlertType
+  condition     AlertCondition
+  targetPrice   Float?
+  indicatorName String?
+  indicatorValue Float?
+  isActive      Boolean     @default(true)
+  isTriggered   Boolean     @default(false)
+  triggeredAt   DateTime?
+  lastNotified  DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  User User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([symbol])
+  @@index([isActive])
+}
+
+enum AlertType {
+  PRICE
+  INDICATOR
+  PERCENT_CHANGE
+}
+
+enum AlertCondition {
+  ABOVE
+  BELOW
+  CROSSES_ABOVE
+  CROSSES_BELOW
+}
+
+// ==========================================
+// STOCK DATA CACHE MODEL
+// ==========================================
+
+model StockDataCache {
+  id          String   @id @default(uuid())
+  symbol      String
+  dataType    String   // 'quote', 'intraday', 'daily', 'weekly'
+  interval    String?  // '1m', '5m', '15m', '1h', '1d'
+  data        Json
+  fetchedAt   DateTime @default(now())
+  expiresAt   DateTime
+
+  @@unique([symbol, dataType, interval])
+  @@index([symbol])
+  @@index([expiresAt])
+}
+
+// ==========================================
+// PREDICTION & BACKTEST MODELS
+// ==========================================
+
+model Prediction {
+  id              String   @id @default(uuid())
+  symbol          String
+  currentPrice    Float?
+  predictedPrice  Float
+  upperBand       Float?
+  lowerBand       Float?
+  confidence      Float
+  method          String   @default("linear_regression")
+  horizon         Int      @default(30) // days
+  backtestAccuracy Float?
+  disclaimer      String?
+  createdAt       DateTime @default(now())
+
+  @@index([symbol])
+  @@index([createdAt])
+}
+
+model BacktestResult {
+  id              String   @id @default(uuid())
+  userId          String?
+  strategyName    String
+  strategyConfig  Json
+  symbol          String
+  startDate       DateTime
+  endDate         DateTime
+  initialCapital  Float
+  finalCapital    Float
+  totalReturn     Float
+  annualizedReturn Float
+  sharpeRatio     Float?
+  maxDrawdown     Float
+  winRate         Float
+  totalTrades     Int
+  profitableTrades Int
+  trades          Json     // Array of trade objects
+  equityCurve     Json     // Daily equity values
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([symbol])
+  @@index([strategyName])
+}
+
+// ==========================================
+// SENTIMENT & NEWS MODELS
+// ==========================================
+
+model SentimentData {
+  id            String   @id @default(uuid())
+  symbol        String
+  overallScore  Float    // -1 to 1
+  newsScore     Float?
+  socialScore   Float?
+  analystScore  Float?
+  sources       Json?    // Array of sentiment sources
+  articleCount  Int      @default(0)
+  fetchedAt     DateTime @default(now())
+  expiresAt     DateTime
+
+  @@unique([symbol])
+  @@index([symbol])
+  @@index([expiresAt])
+}
+
+model NewsArticle {
+  id          String   @id @default(uuid())
+  symbol      String?
+  title       String
+  summary     String?
+  url         String   @unique
+  source      String
+  sentiment   Float?   // -1 to 1
+  publishedAt DateTime
+  fetchedAt   DateTime @default(now())
+
+  @@index([symbol])
+  @@index([publishedAt])
+}
+
+// ==========================================
+// PAYMENT & SUBSCRIPTION MODELS
+// ==========================================
+
+model Subscription {
+  id                    String   @id @default(uuid())
+  userId                String
+  stripeSubscriptionId  String?  @unique
+  razorpaySubscriptionId String? @unique
+  stripePriceId         String?
+  plan                  SubscriptionPlan
+  status                SubscriptionStatus
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  User User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  PAST_DUE
+  TRIALING
+  INCOMPLETE
+}
+
+model Payment {
+  id         String   @id @default(uuid())
+  userId     String
+  externalId String?  @unique // Stripe or Razorpay payment ID
+  amount     Float
+  currency   String   @default("INR")
+  status     String   // COMPLETED, FAILED, PENDING
+  provider   String   @default("STRIPE") // STRIPE or RAZORPAY
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
